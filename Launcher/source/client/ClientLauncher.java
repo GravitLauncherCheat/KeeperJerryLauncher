@@ -7,12 +7,9 @@ import launcher.Launcher;
 import launcher.Launcher.Config;
 import launcher.LauncherAPI;
 import launcher.client.ClientProfile.Version;
-import launcher.hasher.DirWatcher;
-import launcher.hasher.FileNameMatcher;
 import launcher.hasher.HashedDir;
 import launcher.helper.*;
 import launcher.helper.JVMHelper.OS;
-import launcher.request.update.LauncherRequest;
 import launcher.serialize.HInput;
 import launcher.serialize.HOutput;
 import launcher.serialize.signed.SignedObjectHolder;
@@ -28,7 +25,6 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
 import java.security.interfaces.RSAPublicKey;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 public final class ClientLauncher
@@ -53,18 +49,9 @@ public final class ClientLauncher
     private static final Path NATIVES_DIR = IOHelper.toPath("natives");
     private static final Path RESOURCEPACKS_DIR = IOHelper.toPath("resourcepacks");
     private static final Pattern UUID_PATTERN = Pattern.compile("-", Pattern.LITERAL);
-    // Used to determine from clientside is launched from launcher
-    private static final AtomicBoolean LAUNCHED = new AtomicBoolean(false);
+    private static Path loaderPath;
 
-    private ClientLauncher()
-    {
-    }
-
-    @LauncherAPI
-    public static boolean isLaunched()
-    {
-        return LAUNCHED.get();
-    }
+    private ClientLauncher() {}
 
     public static String jvmProperty(String name, String value)
     {
@@ -79,8 +66,7 @@ public final class ClientLauncher
         // Write params file (instead of CLI; Mustdie32 API can't handle command line > 32767 chars)
         LogHelper.debug("Writing ClientLauncher params file");
         Path paramsFile = Files.createTempFile("ClientLauncherParams", ".bin");
-        try (HOutput output = new HOutput(IOHelper.newOutput(paramsFile)))
-        {
+        try (HOutput output = new HOutput(IOHelper.newOutput(paramsFile))) {
             params.write(output);
             profile.write(output);
 
@@ -93,8 +79,7 @@ public final class ClientLauncher
         // Resolve java bin and set permissions
         LogHelper.debug("Resolving JVM binary");
         Path javaBin = IOHelper.resolveJavaBin(jvmDir);
-        if (IOHelper.POSIX)
-        {
+        if (IOHelper.POSIX) {
             Files.setPosixFilePermissions(javaBin, BIN_POSIX_PERMISSIONS);
         }
 
@@ -152,56 +137,28 @@ public final class ClientLauncher
     }
 
     @LauncherAPI
-    public static void main(String... args) throws Throwable
-    {
+    public static void main(String... args) throws Throwable {
         LogHelper.printVersion("Client Launcher");
 
-        // Resolve params file
-        VerifyHelper.verifyInt(args.length, l -> l >= 1, "Missing args: <paramsFile>");
         Path paramsFile = IOHelper.toPath(args[0]);
 
         // Read and delete params file
         LogHelper.debug("Reading ClientLauncher params file");
         Params params;
         SignedObjectHolder<ClientProfile> profile;
-        SignedObjectHolder<HashedDir> jvmHDir, assetHDir, clientHDir;
         RSAPublicKey publicKey = Launcher.getConfig().publicKey;
-        try (HInput input = new HInput(IOHelper.newInput(paramsFile)))
-        {
+        try (HInput input = new HInput(IOHelper.newInput(paramsFile))) {
             params = new Params(input);
             profile = new SignedObjectHolder<>(input, publicKey, ClientProfile.RO_ADAPTER);
-
-            // Read hdirs
-            jvmHDir = new SignedObjectHolder<>(input, publicKey, HashedDir::new);
-            assetHDir = new SignedObjectHolder<>(input, publicKey, HashedDir::new);
-            clientHDir = new SignedObjectHolder<>(input, publicKey, HashedDir::new);
-        }
-        finally
-        {
+        } finally {
             Files.delete(paramsFile);
         }
 
+        loaderPath = IOHelper.getCodeSource(ClientLauncher.class).getParent().resolve("liteloader-" + profile.object.getVersion().replace("Minecraft ", "") + ".jar");
+
         // Start client with WatchService monitoring
-        boolean digest = !profile.object.isUpdateFastCheck();
-        LogHelper.debug("Starting JVM and client WatchService");
-        FileNameMatcher assetMatcher = profile.object.getAssetUpdateMatcher();
-        FileNameMatcher clientMatcher = profile.object.getClientUpdateMatcher();
-        try (DirWatcher jvmWatcher = new DirWatcher(IOHelper.JVM_DIR, jvmHDir.object, null, digest); // JVM Watcher
-             DirWatcher assetWatcher = new DirWatcher(params.assetDir, assetHDir.object, assetMatcher, digest);
-             DirWatcher clientWatcher = new DirWatcher(params.clientDir, clientHDir.object, clientMatcher, digest))
-        {
-            // Start WatchService, and only then client
-            CommonHelper.newThread("JVM Directory Watcher", true, jvmWatcher).start();
-            CommonHelper.newThread("Asset Directory Watcher", true, assetWatcher).start();
-            CommonHelper.newThread("Client Directory Watcher", true, clientWatcher).start();
-
-            // Verify current state of all dirs
-            verifyHDir(IOHelper.JVM_DIR, jvmHDir.object, null, digest);
-            verifyHDir(params.assetDir, assetHDir.object, assetMatcher, digest);
-            verifyHDir(params.clientDir, clientHDir.object, clientMatcher, digest);
-
-            launch(profile.object, params);
-        }
+        LogHelper.debug("Starting JVM");
+        launch(profile.object, params);
     }
 
     @LauncherAPI
@@ -209,9 +166,6 @@ public final class ClientLauncher
     {
         return UUID_PATTERN.matcher(uuid.toString()).replaceAll("");
     }
-
-    @LauncherAPI
-    public static void verifyHDir(Path dir, HashedDir hdir, FileNameMatcher matcher, boolean digest) throws IOException {}
 
     private static void addClientArgs(Collection<String> args, ClientProfile profile, Params params)
     {
@@ -282,6 +236,9 @@ public final class ClientLauncher
             Collections.addAll(args, "--width", Integer.toString(params.width));
             Collections.addAll(args, "--height", Integer.toString(params.height));
         }
+        if (loaderPath.toFile().exists()) {
+            Collections.addAll(args, "--tweakClass", "com.mumfrey.liteloader.launch.LiteLoaderTweaker");
+        }
     }
 
     private static void addClientLegacyArgs(Collection<String> args, ClientProfile profile, Params params)
@@ -295,8 +252,7 @@ public final class ClientLauncher
         Collections.addAll(args, "--assetsDir", params.assetDir.toString());
     }
 
-    private static void launch(ClientProfile profile, Params params) throws Throwable
-    {
+    private static void launch(ClientProfile profile, Params params) throws Throwable {
         // Add natives path
         JVMHelper.addNativePath(params.clientDir.resolve(NATIVES_DIR));
 
@@ -311,13 +267,16 @@ public final class ClientLauncher
             addClientLegacyArgs(args, profile, params);
         }
         Collections.addAll(args, profile.getClientArgs());
+
         LogHelper.debug("Args: " + args);
 
         // Add client classpath
         URL[] classPath = resolveClassPath(params.clientDir, profile.getClassPath());
-        for (URL url : classPath)
-        {
+        for (URL url : classPath) {
             JVMHelper.addClassPath(url);
+        }
+        if (loaderPath.toFile().exists()) {
+            JVMHelper.addClassPath(loaderPath.toUri().toURL());
         }
 
         // Resolve main class and method
@@ -326,7 +285,6 @@ public final class ClientLauncher
                 .asFixedArity();
 
         // Invoke main method with exception wrapping
-        LAUNCHED.set(true);
         JVMHelper.fullGC();
         System.setProperty("minecraft.launcher.brand", "KeeperJerry's NekroLauncher");
         System.setProperty("minecraft.launcher.version", Launcher.VERSION);

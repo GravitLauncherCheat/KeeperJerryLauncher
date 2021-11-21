@@ -1,7 +1,6 @@
 package com.mojang.authlib.yggdrasil;
 
 import launcher.LauncherAPI;
-import launcher.client.ClientLauncher;
 import launcher.helper.CommonHelper;
 import launcher.helper.IOHelper;
 import launcher.helper.LogHelper;
@@ -35,10 +34,6 @@ public class LegacyBridge {
 
     @SuppressWarnings("unused")
     public static String joinServer(String username, String accessToken, String serverID) {
-        if (!ClientLauncher.isLaunched()) {
-            return "Bad Login (Cheater)";
-        }
-
         // Join server
         LogHelper.debug("LegacyBridge.joinServer, Username: '%s', Access token: %s, Server ID: %s", username, accessToken, serverID);
         try {
