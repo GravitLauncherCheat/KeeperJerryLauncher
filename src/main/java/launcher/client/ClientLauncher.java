@@ -414,5 +414,3 @@ public final class ClientLauncher
         }
     }
 }
-
-// Н@хуя это здесь? *facepam* И главное нахуя?

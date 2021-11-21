@@ -2,14 +2,8 @@ package launcher.helper;
 
 import launcher.Launcher;
 import launcher.LauncherAPI;
-import org.fusesource.jansi.Ansi;
-import org.fusesource.jansi.Ansi.Attribute;
-import org.fusesource.jansi.Ansi.Color;
-import org.fusesource.jansi.AnsiConsole;
-import org.fusesource.jansi.AnsiOutputStream;
 
 import java.io.*;
-import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
@@ -23,10 +17,6 @@ public final class LogHelper
 {
     @LauncherAPI
     public static final String DEBUG_PROPERTY = "launcher.debug";
-    @LauncherAPI
-    public static final String NO_JANSI_PROPERTY = "launcher.noJAnsi";
-    @LauncherAPI
-    public static final boolean JANSI;
 
     // Output settings
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm:ss", Locale.US);
@@ -34,51 +24,13 @@ public final class LogHelper
     private static final Set<Output> OUTPUTS = Collections.newSetFromMap(new ConcurrentHashMap<>(2));
     private static final Output STD_OUTPUT;
 
-    static
-    {
-        // Use JAnsi if available
-        boolean jansi;
-        try
-        {
-            if (Boolean.getBoolean(NO_JANSI_PROPERTY))
-            {
-                jansi = false;
-            }
-            else
-            {
-                Class.forName("org.fusesource.jansi.Ansi");
-                AnsiConsole.systemInstall();
-                jansi = true;
-            }
-        }
-        catch (ClassNotFoundException ignored)
-        {
-            jansi = false;
-        }
-        JANSI = jansi;
-
+    static {
         // Add std writer
         STD_OUTPUT = System.out::println;
         addOutput(STD_OUTPUT);
-
-        // Add file log writer
-        String logFile = System.getProperty("launcher.logFile");
-        if (logFile != null)
-        {
-            try
-            {
-                addOutput(IOHelper.toPath(logFile));
-            }
-            catch (IOException e)
-            {
-                error(e);
-            }
-        }
     }
 
-    private LogHelper()
-    {
-    }
+    private LogHelper() {}
 
     @LauncherAPI
     public static void addOutput(Output output)
@@ -87,29 +39,8 @@ public final class LogHelper
     }
 
     @LauncherAPI
-    public static void addOutput(Path file) throws IOException
-    {
-        if (JANSI)
-        {
-            addOutput(new JAnsiOutput(IOHelper.newOutput(file, true)));
-        }
-        else
-        {
-            addOutput(IOHelper.newWriter(file, true));
-        }
-    }
-
-    @LauncherAPI
-    public static void addOutput(Writer writer) throws IOException
-    {
-        addOutput(new WriterOutput(writer));
-    }
-
-    @LauncherAPI
-    public static void debug(String message)
-    {
-        if (isDebugEnabled())
-        {
+    public static void debug(String message) {
+        if (isDebugEnabled()) {
             log(Level.DEBUG, message, false);
         }
     }
@@ -166,14 +97,13 @@ public final class LogHelper
     public static void log(Level level, String message, boolean sub)
     {
         String dateTime = DATE_TIME_FORMATTER.format(LocalDateTime.now());
-        println(JANSI ? ansiFormatLog(level, dateTime, message, sub) :
-                formatLog(level, message, dateTime, sub));
+        println(formatLog(level, message, dateTime, sub));
     }
 
     @LauncherAPI
     public static void printVersion(String product)
     {
-        println(JANSI ? ansiFormatVersion(product) : formatVersion(product));
+        println(formatVersion(product));
     }
 
     @LauncherAPI
@@ -265,68 +195,6 @@ public final class LogHelper
         warning(String.format(format, args));
     }
 
-    private static String ansiFormatLog(Level level, String dateTime, String message, boolean sub)
-    {
-        Color levelColor;
-        boolean bright = level != Level.DEBUG;
-        switch (level)
-        {
-            case WARNING:
-                levelColor = Color.YELLOW;
-                break;
-            case ERROR:
-                levelColor = Color.RED;
-                break;
-            default: // INFO, DEBUG, Unknown
-                levelColor = Color.WHITE;
-                break;
-        }
-
-        // Date-time
-        Ansi ansi = new Ansi();
-        ansi.fg(Color.WHITE).a(dateTime);
-
-        // Level
-        ansi.fgBright(Color.WHITE).a(" [").bold();
-        if (bright)
-        {
-            ansi.fgBright(levelColor);
-        }
-        else
-        {
-            ansi.fg(levelColor);
-        }
-        ansi.a(level).boldOff().fgBright(Color.WHITE).a("] ");
-
-        // Message
-        if (bright)
-        {
-            ansi.fgBright(levelColor);
-        }
-        else
-        {
-            ansi.fg(levelColor);
-        }
-        if (sub)
-        {
-            ansi.a(' ').a(Attribute.ITALIC);
-        }
-        ansi.a(message);
-
-        // Finish with reset code
-        return ansi.reset().toString();
-    }
-
-    private static String ansiFormatVersion(String product)
-    {
-        return new Ansi().bold(). // Setup
-                fgBright(Color.MAGENTA).a("KeeperJerry's "). // Autor mirror
-                fgBright(Color.CYAN).a(product). // Product
-                fgBright(Color.WHITE).a(" v").fgBright(Color.BLUE).a(Launcher.VERSION). // Version
-                fgBright(Color.WHITE).a(" (build #").fgBright(Color.RED).a(Launcher.BUILD).fgBright(Color.WHITE).a(')'). // Build#
-                reset().toString(); // To string
-    }
-
     private static String formatLog(Level level, String message, String dateTime, boolean sub)
     {
         if (sub)
@@ -364,14 +232,6 @@ public final class LogHelper
     public interface Output
     {
         void println(String message);
-    }
-
-    private static final class JAnsiOutput extends WriterOutput
-    {
-        private JAnsiOutput(OutputStream output) throws IOException
-        {
-            super(IOHelper.newWriter(new AnsiOutputStream(output)));
-        }
     }
 
     private static class WriterOutput implements Output, AutoCloseable
