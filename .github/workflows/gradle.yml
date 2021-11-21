@@ -25,7 +25,7 @@ jobs:
       - name: Create artifacts
         run: |
           mkdir artifacts
-          move Launcher\build\libs\Launcher.jar artifacts
+          move build\libs\Launcher.jar artifacts
       
       - name: Upload artifacts
         uses: actions/upload-artifact@v1
